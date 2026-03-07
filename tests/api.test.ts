@@ -1,156 +1,160 @@
-import request from 'supertest';
-import app from '../src/index';
-import prisma from '../src/db/client';
-import { redis } from '../src/utils/cache';
-import { worker, schedulingQueue } from '../src/worker';
+import request from "supertest";
+import app from "../src/index";
+import prisma from "../src/db/client";
+import { redis } from "../src/utils/cache";
+import { worker, schedulingQueue, workerConnection } from "../src/worker";
 
-describe('API Tests', () => {
-    let token: string;
-    let postId: number;
+describe("API Tests", () => {
+  let token: string;
+  let postId: number;
 
-    beforeAll(async () => {
-        // Clean database
-        await prisma.postRevision.deleteMany();
-        await prisma.post.deleteMany();
-        await prisma.user.deleteMany();
+  beforeAll(async () => {
+    // Clean database
+    await prisma.postRevision.deleteMany();
+    await prisma.post.deleteMany();
+    await prisma.user.deleteMany();
+  });
+
+  afterAll(async () => {
+    await prisma.$disconnect();
+    await worker.close();
+    await schedulingQueue.close();
+    await workerConnection.quit();
+    redis.quit();
+  });
+
+  it("Health Check", async () => {
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("healthy");
+  });
+
+  it("Registers an author", async () => {
+    const res = await request(app).post("/auth/register").send({
+      username: "author1",
+      email: "author1@test.com",
+      password: "testpassword",
+      role: "author",
     });
+    expect(res.status).toBe(201);
+  });
 
-    afterAll(async () => {
-        await prisma.$disconnect();
-        await worker.close();
-        await schedulingQueue.close();
-        redis.quit();
+  it("Logs in and gets token", async () => {
+    const res = await request(app).post("/auth/login").send({
+      email: "author1@test.com",
+      password: "testpassword",
     });
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeDefined();
+    token = res.body.token;
+  });
 
-    it('Health Check', async () => {
-        const res = await request(app).get('/health');
-        expect(res.status).toBe(200);
-        expect(res.body.status).toBe('healthy');
-    });
+  it("Creates a post", async () => {
+    const res = await request(app)
+      .post("/posts")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "First Post",
+        content: "Content of the first post",
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe("draft");
+    expect(res.body.slug).toBe("first-post");
+    postId = res.body.id;
+  });
 
-    it('Registers an author', async () => {
-        const res = await request(app).post('/auth/register').send({
-            username: 'author1',
-            email: 'author1@test.com',
-            password: 'testpassword',
-            role: 'author',
-        });
-        expect(res.status).toBe(201);
-    });
+  it("Generates unique slug correctly", async () => {
+    const res = await request(app)
+      .post("/posts")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "First Post",
+        content: "Content again",
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.slug).toBe("first-post-1");
+  });
 
-    it('Logs in and gets token', async () => {
-        const res = await request(app).post('/auth/login').send({
-            email: 'author1@test.com',
-            password: 'testpassword',
-        });
-        expect(res.status).toBe(200);
-        expect(res.body.token).toBeDefined();
-        token = res.body.token;
-    });
+  it("Updates a post and triggers versioning", async () => {
+    const res = await request(app)
+      .put(`/posts/${postId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "First Post Updated",
+        content: "Updated content",
+      });
+    expect(res.status).toBe(200);
 
-    it('Creates a post', async () => {
-        const res = await request(app)
-            .post('/posts')
-            .set('Authorization', `Bearer ${token}`)
-            .send({
-                title: 'First Post',
-                content: 'Content of the first post',
-            });
-        expect(res.status).toBe(201);
-        expect(res.body.status).toBe('draft');
-        expect(res.body.slug).toBe('first-post');
-        postId = res.body.id;
-    });
+    // Check if revision was created
+    const revs = await request(app)
+      .get(`/posts/${postId}/revisions`)
+      .set("Authorization", `Bearer ${token}`);
 
-    it('Generates unique slug correctly', async () => {
-        const res = await request(app)
-            .post('/posts')
-            .set('Authorization', `Bearer ${token}`)
-            .send({
-                title: 'First Post',
-                content: 'Content again',
-            });
-        expect(res.status).toBe(201);
-        expect(res.body.slug).toBe('first-post-1');
-    });
+    expect(revs.status).toBe(200);
+    expect(revs.body).toHaveLength(1);
+    expect(revs.body[0].titleSnapshot).toBe("First Post");
+  });
 
-    it('Updates a post and triggers versioning', async () => {
-        const res = await request(app)
-            .put(`/posts/${postId}`)
-            .set('Authorization', `Bearer ${token}`)
-            .send({
-                title: 'First Post Updated',
-                content: 'Updated content',
-            });
-        expect(res.status).toBe(200);
+  it("Publishes a post", async () => {
+    const res = await request(app)
+      .post(`/posts/${postId}/publish`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("published");
+  });
 
-        // Check if revision was created
-        const revs = await request(app)
-            .get(`/posts/${postId}/revisions`)
-            .set('Authorization', `Bearer ${token}`);
+  it("Reads published posts publicly", async () => {
+    const res = await request(app).get("/posts/published");
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+  });
 
-        expect(revs.status).toBe(200);
-        expect(revs.body).toHaveLength(1);
-        expect(revs.body[0].titleSnapshot).toBe('First Post');
-    });
+  it("Schedules a post", async () => {
+    const futureDate = new Date();
+    futureDate.setMinutes(futureDate.getMinutes() + 10);
 
-    it('Publishes a post', async () => {
-        const res = await request(app)
-            .post(`/posts/${postId}/publish`)
-            .set('Authorization', `Bearer ${token}`);
-        expect(res.status).toBe(200);
-        expect(res.body.status).toBe('published');
-    });
+    // create another post
+    const draftUserParams = { title: "Scheduled attempt", content: "content" };
+    const draftRes = await request(app)
+      .post("/posts")
+      .set("Authorization", `Bearer ${token}`)
+      .send(draftUserParams);
 
-    it('Reads published posts publicly', async () => {
-        const res = await request(app).get('/posts/published');
-        expect(res.status).toBe(200);
-        expect(res.body.items).toHaveLength(1);
-    });
+    const scheduleId = draftRes.body.id;
 
-    it('Schedules a post', async () => {
-        const futureDate = new Date();
-        futureDate.setMinutes(futureDate.getMinutes() + 10);
+    const res = await request(app)
+      .post(`/posts/${scheduleId}/schedule`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        scheduledFor: futureDate.toISOString(),
+      });
 
-        // create another post
-        const draftUserParams = { title: 'Scheduled attempt', content: 'content' };
-        const draftRes = await request(app).post('/posts').set('Authorization', `Bearer ${token}`).send(draftUserParams);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("scheduled");
+  });
 
-        const scheduleId = draftRes.body.id;
+  it("Searches published posts correctly", async () => {
+    const res = await request(app).get("/posts/search?q=First");
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].title).toBe("First Post Updated");
+  });
 
-        const res = await request(app)
-            .post(`/posts/${scheduleId}/schedule`)
-            .set('Authorization', `Bearer ${token}`)
-            .send({
-                scheduledFor: futureDate.toISOString()
-            });
+  it("Invalidates cache on post update", async () => {
+    // Fetch to populate cache
+    await request(app).get("/posts/published");
 
-        expect(res.status).toBe(200);
-        expect(res.body.status).toBe('scheduled');
-    });
+    // Update post
+    const resUpdate = await request(app)
+      .put(`/posts/${postId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "First Post Updated Again",
+      });
+    expect(resUpdate.status).toBe(200);
 
-    it('Searches published posts correctly', async () => {
-        const res = await request(app).get('/posts/search?q=First');
-        expect(res.status).toBe(200);
-        expect(res.body).toHaveLength(1);
-        expect(res.body[0].title).toBe('First Post Updated');
-    });
-
-    it('Invalidates cache on post update', async () => {
-        // Fetch to populate cache
-        await request(app).get('/posts/published');
-
-        // Update post
-        const resUpdate = await request(app)
-            .put(`/posts/${postId}`)
-            .set('Authorization', `Bearer ${token}`)
-            .send({
-                title: 'First Post Updated Again',
-            });
-        expect(resUpdate.status).toBe(200);
-
-        // Fetch again, should not be stale
-        const res = await request(app).get('/posts/published');
-        expect(res.body.items[0].title).toBe('First Post Updated Again');
-    });
+    // Fetch again, should not be stale
+    const res = await request(app).get("/posts/published");
+    expect(res.body.items[0].title).toBe("First Post Updated Again");
+  });
 });
