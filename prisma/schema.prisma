@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  author
+  public
+}
+
+enum PostStatus {
+  draft
+  scheduled
+  published
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  username      String         @unique
+  email         String         @unique
+  passwordHash  String         @map("password_hash")
+  role          Role           @default(public)
+  posts         Post[]
+  revisions     PostRevision[]
+
+  @@map("users")
+}
+
+model Post {
+  id            Int            @id @default(autoincrement())
+  title         String
+  slug          String         @unique
+  content       String
+  status        PostStatus     @default(draft)
+  authorId      Int            @map("author_id")
+  scheduledFor  DateTime?      @map("scheduled_for")
+  publishedAt   DateTime?      @map("published_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  author        User           @relation(fields: [authorId], references: [id])
+  revisions     PostRevision[]
+
+  @@map("posts")
+}
+
+model PostRevision {
+  id                Int      @id @default(autoincrement())
+  postId            Int      @map("post_id")
+  titleSnapshot     String   @map("title_snapshot")
+  contentSnapshot   String   @map("content_snapshot")
+  revisionAuthorId  Int      @map("revision_author_id")
+  revisionTimestamp DateTime @default(now()) @map("revision_timestamp")
+
+  post              Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  revisionAuthor    User     @relation(fields: [revisionAuthorId], references: [id])
+
+  @@map("post_revisions")
+}
