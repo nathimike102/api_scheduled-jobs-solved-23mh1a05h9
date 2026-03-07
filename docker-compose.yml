@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   db:
@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U user -d partnr_db" ]
+      test: ["CMD-SHELL", "pg_isready -U user -d partnr_db"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -24,7 +24,7 @@ services:
 
   api:
     build: .
-    command: sh -c "npx prisma db push --accept-data-loss && npm start"
+    command: sh -c "npx prisma migrate deploy && npm start"
     ports:
       - "8000:8000"
     environment:

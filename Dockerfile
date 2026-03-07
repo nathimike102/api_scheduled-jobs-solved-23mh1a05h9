@@ -1,5 +1,4 @@
-FROM node:20-alpine
-RUN apk add --no-cache openssl
+FROM node:20-bookworm-slim
 WORKDIR /app
 
 COPY package*.json ./
