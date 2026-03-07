@@ -13,6 +13,21 @@ app.use(express.json());
 
 app.use("/static", express.static("uploads"));
 
+const apiV1Router = express.Router();
+apiV1Router.use("/auth", authRouter);
+apiV1Router.use("/posts", publicRouter);
+apiV1Router.use("/posts", postsRouter);
+apiV1Router.use("/media", mediaRouter);
+apiV1Router.get("/search", searchHandler);
+apiV1Router.get("/health", (req, res) => {
+  res.json({ status: "healthy" });
+});
+apiV1Router.get("/", (req, res) => {
+  res.json({ status: "ok", message: "API V1 is running" });
+});
+
+app.use("/api/v1", apiV1Router);
+
 app.use("/auth", authRouter);
 app.use("/posts", publicRouter); // public endpoints intercepting /published etc before dynamic IDs
 app.use("/posts", postsRouter);
