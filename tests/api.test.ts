@@ -1,6 +1,8 @@
 import request from 'supertest';
 import app from '../src/index';
 import prisma from '../src/db/client';
+import { redis } from '../src/utils/cache';
+import { worker, schedulingQueue } from '../src/worker';
 
 describe('API Tests', () => {
     let token: string;
@@ -15,6 +17,9 @@ describe('API Tests', () => {
 
     afterAll(async () => {
         await prisma.$disconnect();
+        await worker.close();
+        await schedulingQueue.close();
+        redis.quit();
     });
 
     it('Health Check', async () => {
@@ -122,5 +127,30 @@ describe('API Tests', () => {
 
         expect(res.status).toBe(200);
         expect(res.body.status).toBe('scheduled');
+    });
+
+    it('Searches published posts correctly', async () => {
+        const res = await request(app).get('/posts/search?q=First');
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveLength(1);
+        expect(res.body[0].title).toBe('First Post Updated');
+    });
+
+    it('Invalidates cache on post update', async () => {
+        // Fetch to populate cache
+        await request(app).get('/posts/published');
+
+        // Update post
+        const resUpdate = await request(app)
+            .put(`/posts/${postId}`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+                title: 'First Post Updated Again',
+            });
+        expect(resUpdate.status).toBe(200);
+
+        // Fetch again, should not be stale
+        const res = await request(app).get('/posts/published');
+        expect(res.body.items[0].title).toBe('First Post Updated Again');
     });
 });
