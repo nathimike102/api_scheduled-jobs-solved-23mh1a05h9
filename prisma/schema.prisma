@@ -48,6 +48,9 @@ model Post {
   author        User           @relation(fields: [authorId], references: [id])
   revisions     PostRevision[]
 
+  @@index([authorId])
+  @@index([status, scheduledFor])
+  @@index([status, publishedAt])
   @@map("posts")
 }
 
@@ -62,5 +65,7 @@ model PostRevision {
   post              Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   revisionAuthor    User     @relation(fields: [revisionAuthorId], references: [id])
 
+  @@index([postId])
+  @@index([revisionAuthorId])
   @@map("post_revisions")
 }
