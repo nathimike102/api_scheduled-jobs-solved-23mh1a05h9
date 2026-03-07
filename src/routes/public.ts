@@ -71,11 +71,11 @@ router.get('/search', async (req, res) => {
 
         // Using Prisma's raw query for PostgreSQL full-text search across title and content
         const posts = await prisma.$queryRaw`
-      SELECT id, title, slug, content, status, "authorId", "scheduledFor", "publishedAt", "createdAt", "updatedAt"
-      FROM "Post"
+      SELECT id, title, slug, content, status, author_id as "authorId", scheduled_for as "scheduledFor", published_at as "publishedAt", created_at as "createdAt", updated_at as "updatedAt"
+      FROM "posts"
       WHERE status = 'published'
       AND (to_tsvector('english', title) || to_tsvector('english', content)) @@ plainto_tsquery('english', ${q})
-      ORDER BY "publishedAt" DESC
+      ORDER BY published_at DESC
       LIMIT 50;
     `;
 
