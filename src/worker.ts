@@ -46,8 +46,8 @@ export const worker = new Worker(
       let publishedCount = 0;
       await prisma.$transaction(
         postsToPublish.map((post: any) =>
-          prisma.post.update({
-            where: { id: post.id },
+          prisma.post.updateMany({
+            where: { id: post.id, status: "scheduled" },
             data: {
               status: "published",
               publishedAt: now,
