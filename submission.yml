@@ -1,0 +1,7 @@
+setup: |
+  docker-compose build
+  docker-compose run --rm api npx prisma migrate deploy
+run_tests: |
+  docker-compose run --rm api npm test
+start: |
+  docker-compose up -d
