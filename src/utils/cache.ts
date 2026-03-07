@@ -26,10 +26,21 @@ export const setCache = async (key: string, value: any, expireSeconds: number = 
     }
 };
 
-export const invalidatePostCache = async (postId: number): Promise<void> => {
+export const invalidatePostCache = async (postId?: number): Promise<void> => {
     try {
-        await redis.del(`post_public_${postId}`);
-        await redis.del('posts_public_list');
+        if (postId) {
+            await redis.del(`post_public_${postId}`);
+        }
+
+        // Use scan to clear all paginated list caches
+        let cursor = '0';
+        do {
+            const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'posts_public_list_*', 'COUNT', 100);
+            cursor = nextCursor;
+            if (keys.length > 0) {
+                await redis.del(...keys);
+            }
+        } while (cursor !== '0');
     } catch (error) {
         console.error('invalidatePostCache error:', error);
     }
