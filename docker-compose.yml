@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: partnr_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U user -d partnr_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    command: sh -c "npx prisma db push --accept-data-loss && npm start"
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/partnr_db?schema=public
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=supersecretkey-change-in-prod
+      - PORT=8000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build: .
+    command: sh -c "sleep 5 && npm run worker"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/partnr_db?schema=public
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - api
+      - redis
+      - db
+
+volumes:
+  postgres_data:
